@@ -205,6 +205,30 @@ describe('failures', () => {
     expect(server.calls.putReport).toBe(3);
   });
 
+  it('a network return restarts the retry ladder instead of waiting out the old, long delay', async () => {
+    const { runner, transport, network, store } = setup({ backoff: n => n * 1000 });
+    for (let i = 0; i < 5; i++) {
+      transport.inject('putReport', new HttpError(503));
+    }
+    await runner.start();
+    const report = await runner.enqueue(input());
+    await runner.whenIdle();
+    for (const wait of [1000, 2000, 3000]) {
+      await jest.advanceTimersByTimeAsync(wait);
+      await runner.whenIdle();
+    }
+    expect((await store.get(report.id))?.attempts).toBe(4);
+    expect((await store.get(report.id))!.nextAttemptAt - Date.now()).toBe(4000);
+
+    network.set(false);
+    network.set(true); // the old failures must not keep the wait at 5 s
+    await runner.whenIdle();
+
+    const saved = await store.get(report.id);
+    expect(saved?.attempts).toBe(1);
+    expect(saved!.nextAttemptAt - Date.now()).toBe(1000);
+  });
+
   it('does not retry a permanent rejection, and retry() puts it back', async () => {
     const { runner, transport, server, store } = setup();
     transport.inject('putImage', new HttpError(413), 0);

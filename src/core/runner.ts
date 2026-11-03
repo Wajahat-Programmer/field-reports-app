@@ -51,7 +51,8 @@ export class UploadRunner {
     this.transport = options.transport;
     this.network = options.network;
     this.newId = options.newId;
-    this.stallMs = options.stallMs ?? 30_000;
+    // Generous: a cold start (Android's WebView/cookie setup on first request) can eat many seconds on a weak phone.
+    this.stallMs = options.stallMs ?? 60_000;
     this.backoff = options.backoff ?? backoffMs;
   }
 
@@ -130,12 +131,15 @@ export class UploadRunner {
     return report;
   }
 
-  /** Skips any backoff and clears an auth pause. Call on network return and when the app foregrounds. */
+  /**
+   * Skips any backoff, restarts the retry ladder and clears an auth pause. Call on network return and when
+   * the app foregrounds: conditions changed, so failures from before shouldn't keep the wait at its ceiling.
+   */
   async resume(): Promise<void> {
     this.authBlocked = false;
     for (const report of await this.store.list()) {
-      if (report.status === 'queued' && report.nextAttemptAt !== 0) {
-        await this.save({ ...report, nextAttemptAt: 0 });
+      if (report.status === 'queued' && (report.nextAttemptAt !== 0 || report.attempts !== 0)) {
+        await this.save({ ...report, nextAttemptAt: 0, attempts: 0 });
       }
     }
     this.emitState();
