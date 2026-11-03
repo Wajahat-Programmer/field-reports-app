@@ -205,6 +205,26 @@ describe('failures', () => {
     expect(server.calls.putReport).toBe(3);
   });
 
+  it('cancels an upload in flight the moment the network drops, and resumes when it returns', async () => {
+    const { runner, transport, network, server, store } = setup(); // default stall timeout is 60 s
+    transport.inject('putImage', 'hang', 0);
+    await runner.start();
+    const report = await runner.enqueue(input(2));
+    await jest.advanceTimersByTimeAsync(1);
+    expect((await store.get(report.id))?.status).toBe('uploading');
+
+    network.set(false);
+    await runner.whenIdle(); // no fake time advanced: it must not wait for the stall timer
+    const waiting = await store.get(report.id);
+    expect(waiting?.status).toBe('queued');
+    expect(waiting?.attempts).toBe(0); // a dropped connection is not this report's failure
+
+    network.set(true);
+    await runner.whenIdle();
+    expect((await store.get(report.id))?.status).toBe('uploaded');
+    expect(server.completed()).toEqual([report.id]);
+  });
+
   it('a network return restarts the retry ladder instead of waiting out the old, long delay', async () => {
     const { runner, transport, network, store } = setup({ backoff: n => n * 1000 });
     for (let i = 0; i < 5; i++) {

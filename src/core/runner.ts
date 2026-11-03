@@ -45,6 +45,8 @@ export class UploadRunner {
   private wake?: ReturnType<typeof setTimeout>;
   private unsubscribeNetwork?: () => void;
   private cancel = new AbortController();
+  private attemptCancel?: AbortController;
+  private lostNetwork = false;
 
   constructor(options: RunnerOptions) {
     this.store = options.store;
@@ -81,6 +83,11 @@ export class UploadRunner {
       this.emitState();
       if (online) {
         this.resuming = this.resume();
+      } else {
+        // The connection a request is using is dead, but the phone won't notice for a long time. Cancel it now
+        // instead of waiting out the stall timer, so the retry starts the moment the network is back.
+        this.lostNetwork = true;
+        this.attemptCancel?.abort();
       }
     });
     this.emitState();
@@ -221,10 +228,15 @@ export class UploadRunner {
 
   private async attempt(start: Report): Promise<void> {
     let current = await this.save({ ...start, status: 'uploading' });
+    const cancel = new AbortController();
+    const onReset = () => cancel.abort();
+    this.cancel.signal.addEventListener('abort', onReset);
+    this.attemptCancel = cancel;
+    this.lostNetwork = false;
     try {
       await uploadReport(current, this.transport, {
         stallMs: this.stallMs,
-        signal: this.cancel.signal,
+        signal: cancel.signal,
         onProgress: (index, sentBytes) =>
           this.emit({ type: 'progress', id: current.id, index, sentBytes, totalBytes: current.images[index].bytes }),
         onImageUploaded: async index => {
@@ -241,6 +253,12 @@ export class UploadRunner {
     } catch (err) {
       if (this.stopped) {
         return; // leave it 'uploading'; start() requeues it next run
+      }
+      if (this.lostNetwork) {
+        // The connection dropped under us. That is not a failure of this report: wait for the network to return.
+        this.lostNetwork = false;
+        await this.save({ ...current, status: 'queued', nextAttemptAt: 0 });
+        return;
       }
       const verdict = classify(err);
       const lastError = err instanceof Error ? err.message : String(err);
@@ -260,6 +278,9 @@ export class UploadRunner {
         nextAttemptAt: verdict === 'auth' ? 0 : Date.now() + this.backoff(attempts),
         lastError,
       });
+    } finally {
+      this.cancel.signal.removeEventListener('abort', onReset);
+      this.attemptCancel = undefined;
     }
   }
 
