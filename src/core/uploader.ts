@@ -5,6 +5,8 @@ import type { Report } from './types';
 export interface UploadHooks {
   /** A request that moves no bytes for this long is aborted, so a hung request can't block the queue. */
   stallMs: number;
+  /** Aborts whatever request is in flight (used by reset). */
+  signal?: AbortSignal;
   onProgress(index: number, sentBytes: number): void;
   onImageUploaded(index: number): Promise<void>;
   onImagesMissing(indexes: number[]): Promise<void>;
@@ -13,6 +15,7 @@ export interface UploadHooks {
 /** Runs `fn` with a watchdog: aborts and rejects when `touch()` isn't called for `stallMs`. */
 function guarded<T>(
   stallMs: number,
+  outer: AbortSignal | undefined,
   fn: (signal: AbortSignal, touch: () => void) => Promise<T>,
 ): Promise<T> {
   const controller = new AbortController();
@@ -28,9 +31,20 @@ function guarded<T>(
       rejectStall(new StallError());
     }, stallMs);
   };
+  const cancel = () => {
+    controller.abort();
+    rejectStall(new Error('cancelled'));
+  };
+  if (outer?.aborted) {
+    return Promise.reject(new Error('cancelled'));
+  }
+  outer?.addEventListener('abort', cancel);
   arm();
   // Racing the watchdog means a transport that ignores `signal` still can't hang us.
-  return Promise.race([fn(controller.signal, arm), stalled]).finally(() => clearTimeout(timer));
+  return Promise.race([fn(controller.signal, arm), stalled]).finally(() => {
+    clearTimeout(timer);
+    outer?.removeEventListener('abort', cancel);
+  });
 }
 
 /**
@@ -39,14 +53,14 @@ function guarded<T>(
  */
 export async function uploadReport(report: Report, transport: Transport, hooks: UploadHooks): Promise<void> {
   const { id, description, images } = report;
-  await guarded(hooks.stallMs, signal => transport.putReport(id, { description, imageCount: images.length }, signal));
+  await guarded(hooks.stallMs, hooks.signal, signal => transport.putReport(id, { description, imageCount: images.length }, signal));
 
   const done = new Set(report.uploadedImages);
   for (let index = 0; index < images.length; index++) {
     if (done.has(index)) {
       continue;
     }
-    await guarded(hooks.stallMs, (signal, touch) =>
+    await guarded(hooks.stallMs, hooks.signal, (signal, touch) =>
       transport.putImage(
         id,
         index,
@@ -62,7 +76,7 @@ export async function uploadReport(report: Report, transport: Transport, hooks: 
   }
 
   try {
-    await guarded(hooks.stallMs, signal => transport.complete(id, signal));
+    await guarded(hooks.stallMs, hooks.signal, signal => transport.complete(id, signal));
   } catch (err) {
     const missing = err instanceof HttpError && err.status === 409 ? (err.body as { missing?: unknown })?.missing : undefined;
     if (Array.isArray(missing)) {

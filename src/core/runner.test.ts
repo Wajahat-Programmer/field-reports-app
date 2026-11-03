@@ -126,6 +126,40 @@ describe('surviving a kill', () => {
   });
 });
 
+describe('start over (reset)', () => {
+  it('deletes queued reports and cancels a hung upload at once, leaving nothing to land later', async () => {
+    const { runner, transport, server, store } = setup();
+    transport.inject('putImage', 'hang', 0);
+    await runner.start();
+    const stuck = await runner.enqueue(input(2));
+    await jest.advanceTimersByTimeAsync(1);
+    expect((await store.get(stuck.id))?.status).toBe('uploading');
+    const queued = await runner.enqueue(input());
+
+    const removed = await runner.reset(); // must not wait for the 30 s stall timeout
+
+    expect(removed.map(r => r.id).sort()).toEqual([stuck.id, queued.id].sort());
+    expect(await store.list()).toEqual([]);
+    await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
+    expect(await store.list()).toEqual([]);
+    expect(server.completed()).toEqual([]);
+  });
+
+  it('works normally again after a reset', async () => {
+    const { runner, server, store } = setup();
+    await runner.start();
+    await runner.enqueue(input());
+    await runner.whenIdle();
+    await runner.reset();
+    await runner.start();
+
+    const fresh = await runner.enqueue(input());
+    await runner.whenIdle();
+    expect((await store.get(fresh.id))?.status).toBe('uploaded');
+    expect(server.completed()).toContain(fresh.id);
+  });
+});
+
 describe('failures', () => {
   it('a lost reply to complete is retried and the server still holds one report', async () => {
     const { runner, server, transport, store } = setup();

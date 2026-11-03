@@ -44,6 +44,7 @@ export class UploadRunner {
   private resuming: Promise<void> = Promise.resolve();
   private wake?: ReturnType<typeof setTimeout>;
   private unsubscribeNetwork?: () => void;
+  private cancel = new AbortController();
 
   constructor(options: RunnerOptions) {
     this.store = options.store;
@@ -89,6 +90,27 @@ export class UploadRunner {
     this.stopped = true;
     clearTimeout(this.wake);
     this.unsubscribeNetwork?.();
+  }
+
+  /**
+   * Start over: cancels any upload in flight, then deletes every report held on this phone.
+   * Reports already delivered stay on the server. Returns what was deleted so the caller can
+   * remove its photo files. Call start() again afterwards.
+   */
+  async reset(): Promise<Report[]> {
+    this.stop();
+    this.cancel.abort();
+    while (this.running) {
+      await this.done;
+    }
+    const reports = await this.store.list();
+    for (const report of reports) {
+      await this.store.remove(report.id);
+      this.emit({ type: 'removed', id: report.id });
+    }
+    this.cancel = new AbortController();
+    this.authBlocked = false;
+    return reports;
   }
 
   /** Validates, saves, and only then starts sending. A saved report is never lost. */
@@ -198,6 +220,7 @@ export class UploadRunner {
     try {
       await uploadReport(current, this.transport, {
         stallMs: this.stallMs,
+        signal: this.cancel.signal,
         onProgress: (index, sentBytes) =>
           this.emit({ type: 'progress', id: current.id, index, sentBytes, totalBytes: current.images[index].bytes }),
         onImageUploaded: async index => {
