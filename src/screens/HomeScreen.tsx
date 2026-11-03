@@ -25,7 +25,7 @@ interface Props {
 
 export function HomeScreen({ runner, api, listCache, deliveredCount, onNew, onReset }: Props) {
   const insets = useSafeAreaInsets();
-  const { reports, state, progress } = useRunner(runner);
+  const { reports, state, progress, loaded } = useRunner(runner);
   const { list, refresh } = useServerReports(api, listCache);
   const now = useNow();
 
@@ -43,7 +43,7 @@ export function HomeScreen({ runner, api, listCache, deliveredCount, onNew, onRe
     wasOnline.current = state.online;
   }, [state.online, refresh]);
 
-  const summary = summarize(reports, state);
+  const summary = loaded ? summarize(reports, state) : { tone: 'busy' as const, title: 'Checking your saved reports…' };
   const onPhone = [...reports].reverse().filter(r => r.status !== 'uploaded');
 
   const confirmDelete = (id: string) =>
@@ -111,7 +111,9 @@ export function HomeScreen({ runner, api, listCache, deliveredCount, onNew, onRe
           <View style={styles.empty}>
             {section.key === 'server' && list.status === 'loading' ? <ActivityIndicator /> : null}
             <Text style={styles.emptyText}>
-              {section.key === 'phone'
+              {section.key === 'phone' && !loaded
+                ? 'Loading…'
+                : section.key === 'phone'
                 ? 'Nothing waiting. New reports you save appear here until the server confirms them.'
                 : list.status === 'error'
                   ? "Couldn't load delivered reports. Pull down to try again."

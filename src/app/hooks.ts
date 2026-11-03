@@ -18,10 +18,17 @@ export function useRunner(runner: UploadRunner) {
   const [reports, setReports] = useState<Report[]>([]);
   const [state, setState] = useState<RunnerState>(runner.getState());
   const [progress, setProgress] = useState<Record<string, Progress>>({});
+  // false until the saved reports are read, so the screen never claims "nothing waiting" too early
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    runner.list().then(list => alive && setReports(list.sort(byCreated)));
+    runner.list().then(list => {
+      if (alive) {
+        setReports(list.sort(byCreated));
+        setLoaded(true);
+      }
+    });
     const off = runner.subscribe(event => {
       if (event.type === 'report') {
         setReports(prev => [...prev.filter(r => r.id !== event.report.id), event.report].sort(byCreated));
@@ -39,7 +46,7 @@ export function useRunner(runner: UploadRunner) {
     };
   }, [runner]);
 
-  return { reports, state, progress };
+  return { reports, state, progress, loaded };
 }
 
 /** Re-renders every second so retry countdowns tick. */
