@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ReportsApi, ServerReport } from '../core/reportsApi';
+import type { ListCache } from './listCache';
 import type { RunnerState, UploadRunner } from '../core/runner';
 import type { Report } from '../core/types';
 
@@ -51,13 +52,16 @@ export function useNow(intervalMs = 1000): number {
   return now;
 }
 
-export type ServerList =
-  | { status: 'loading'; reports: ServerReport[] }
-  | { status: 'ok'; reports: ServerReport[] }
-  | { status: 'error'; reports: ServerReport[] };
+export interface ServerList {
+  status: 'loading' | 'ok' | 'error';
+  reports: ServerReport[];
+}
 
-/** What the server holds, fetched from it. Keeps the last good list on screen if a refresh fails. */
-export function useServerReports(api: ReportsApi) {
+/**
+ * What the server holds, fetched from it. If a refresh fails, the last list we got stays on screen,
+ * even across a restart, so being offline never makes delivered reports look lost.
+ */
+export function useServerReports(api: ReportsApi, cache: ListCache) {
   const [list, setList] = useState<ServerList>({ status: 'loading', reports: [] });
   const latest = useRef(0);
 
@@ -67,17 +71,27 @@ export function useServerReports(api: ReportsApi) {
       const reports = await api.list();
       if (ticket === latest.current) {
         setList({ status: 'ok', reports });
+        cache.save(reports).catch(() => {});
       }
     } catch {
       if (ticket === latest.current) {
         setList(prev => ({ status: 'error', reports: prev.reports }));
       }
     }
-  }, [api]);
+  }, [api, cache]);
 
   useEffect(() => {
+    let alive = true;
+    cache.load().then(cached => {
+      if (alive && cached) {
+        setList(prev => (prev.status === 'ok' || prev.reports.length ? prev : { status: prev.status, reports: cached }));
+      }
+    });
     refresh();
-  }, [refresh]);
+    return () => {
+      alive = false;
+    };
+  }, [api, cache, refresh]);
 
   return { list, refresh };
 }

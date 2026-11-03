@@ -11,7 +11,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 const removePhotos = (reports: Report[]) => Promise.all(reports.flatMap(r => r.images.map(i => deletePhoto(i.uri))));
 
 export default function App() {
-  const { runner, api } = useMemo(createServices, []);
+  const { runner, api, listCache } = useMemo(createServices, []);
   const [screen, setScreen] = useState<'home' | 'compose'>('home');
   const [delivered, setDelivered] = useState(0);
 
@@ -59,7 +59,7 @@ export default function App() {
       {screen === 'compose' ? (
         <ComposeScreen runner={runner} onDone={() => setScreen('home')} onCancel={() => setScreen('home')} />
       ) : (
-        <HomeScreen runner={runner} api={api} deliveredCount={delivered} onNew={() => setScreen('compose')} onReset={reset} />
+        <HomeScreen runner={runner} api={api} listCache={listCache} deliveredCount={delivered} onNew={() => setScreen('compose')} onReset={reset} />
       )}
     </SafeAreaProvider>
   );

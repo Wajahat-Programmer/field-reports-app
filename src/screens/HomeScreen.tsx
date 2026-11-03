@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { ListCache } from '../app/listCache';
 import { useNow, useRunner, useServerReports } from '../app/hooks';
 import { summarize } from '../app/status';
 import type { ReportsApi } from '../core/reportsApi';
@@ -15,16 +16,17 @@ import { colors } from '../theme';
 interface Props {
   runner: UploadRunner;
   api: ReportsApi;
+  listCache: ListCache;
   /** Bumps whenever a report is confirmed delivered, so the server list refreshes. */
   deliveredCount: number;
   onNew: () => void;
   onReset: () => Promise<void>;
 }
 
-export function HomeScreen({ runner, api, deliveredCount, onNew, onReset }: Props) {
+export function HomeScreen({ runner, api, listCache, deliveredCount, onNew, onReset }: Props) {
   const insets = useSafeAreaInsets();
   const { reports, state, progress } = useRunner(runner);
-  const { list, refresh } = useServerReports(api);
+  const { list, refresh } = useServerReports(api, listCache);
   const now = useNow();
 
   useEffect(() => {
