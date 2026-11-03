@@ -1,13 +1,15 @@
 import ReactNativeBlobUtil from 'react-native-blob-util';
 
-import type { SendImage } from '../core/httpTransport';
+import type { SendChunk } from '../core/httpTransport';
 
+const { fs } = ReactNativeBlobUtil;
 const toPath = (uri: string) => uri.replace(/^file:\/\//, '');
 
-/** Streams the file straight from disk (never through JS memory) and reports bytes sent. */
-export const blobSendImage: SendImage = async ({ url, headers, image, onProgress, signal }) => {
-  const task = ReactNativeBlobUtil.fetch('PUT', url, headers, ReactNativeBlobUtil.wrap(toPath(image.uri)));
-  task.uploadProgress({ interval: 250 }, sent => onProgress(sent));
+/** Cuts one slice out of the stored photo and PATCHes it, streaming the slice from disk. */
+export const blobSendChunk: SendChunk = async ({ url, headers, image, start, end, signal }) => {
+  const slice = `${fs.dirs.CacheDir}/chunk-${Date.now()}-${start}.bin`;
+  await fs.slice(toPath(image.uri), slice, start, end);
+  const task = ReactNativeBlobUtil.fetch('PATCH', url, headers, ReactNativeBlobUtil.wrap(slice));
   const cancel = () => task.cancel();
   if (signal.aborted) {
     cancel();
@@ -25,5 +27,6 @@ export const blobSendImage: SendImage = async ({ url, headers, image, onProgress
     return { status: response.info().status, body };
   } finally {
     signal.removeEventListener('abort', cancel);
+    fs.unlink(slice).catch(() => {});
   }
 };

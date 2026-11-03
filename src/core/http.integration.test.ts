@@ -182,4 +182,82 @@ describeIfBackend('upload runner against the real backend', () => {
     expect((await delivered(runner, report.id)).status).toBe('uploaded');
     expect(await serverReports()).toHaveLength(1);
   }, 20000);
+
+  describe('chunked upload', () => {
+    const CHUNK = 50_000;
+
+    /** A runner that uploads in chunks; `faults[n]` is armed on the server right before chunk n is sent. */
+    function setupChunked(faults: Record<number, object>) {
+      const sent: number[] = [];
+      let call = 0;
+      const sendChunk = async ({ url, headers, image, start, end, signal }) => {
+        const fault = faults[call++];
+        if (fault) {
+          await admin('PUT', '/admin/faults', fault);
+        }
+        sent.push(end - start);
+        const response = await fetch(url, { method: 'PATCH', headers, body: bytes.get(image.uri).subarray(start, end), signal });
+        return { status: response.status, body: await response.json().catch(() => undefined) };
+      };
+      const runner = new UploadRunner({
+        store: new MemoryStore(),
+        transport: new HttpTransport({ baseUrl: BASE, apiKey: API_KEY, sendChunk, chunkBytes: CHUNK, busyWaitMs: 20 }),
+        network: new FakeNetwork(true),
+        newId: () => '00000000-0000-4000-8000-00000000c0de',
+        stallMs: 5000,
+        backoff: () => 20,
+      });
+      return { runner, sent };
+    }
+
+    async function expectStoredIntact(images: ImageFile[]) {
+      const reports = await serverReports();
+      expect(reports).toHaveLength(1);
+      expect(reports[0].images).toHaveLength(images.length);
+      for (let i = 0; i < images.length; i++) {
+        const stored = Buffer.from(await (await admin('GET', reports[0].images[i].url)).arrayBuffer());
+        expect(stored.equals(bytes.get(images[i].uri))).toBe(true);
+      }
+    }
+
+    it('delivers a multi-chunk image intact', async () => {
+      const { runner, sent } = setupChunked({});
+      const images = [photo(410_000)];
+      await runner.start();
+      const report = await runner.enqueue({ description: 'cracked pipe', images });
+      expect((await delivered(runner, report.id)).status).toBe('uploaded');
+      expect(sent).toHaveLength(9); // 8 full chunks and a short last one
+      await expectStoredIntact(images);
+    });
+
+    it('a connection dropped mid-chunk resumes from the server offset instead of starting over', async () => {
+      const { runner, sent } = setupChunked({ 3: { mode: 'dropMidUpload', dropAfterBytes: 10_000, count: 1 } });
+      const images = [photo(410_000)];
+      await runner.start();
+      const report = await runner.enqueue({ description: 'cracked pipe', images });
+      expect((await delivered(runner, report.id)).status).toBe('uploaded');
+
+      const totalSent = sent.reduce((a, b) => a + b, 0);
+      expect(totalSent).toBeLessThan(410_000 + 2 * CHUNK); // at most the chunk in flight is repeated
+      await expectStoredIntact(images);
+    });
+
+    it('a lost reply to the last chunk is harmless', async () => {
+      const { runner } = setupChunked({ 8: { mode: 'lostResponse', count: 1 } });
+      const images = [photo(410_000)];
+      await runner.start();
+      const report = await runner.enqueue({ description: 'cracked pipe', images });
+      expect((await delivered(runner, report.id)).status).toBe('uploaded');
+      await expectStoredIntact(images);
+    });
+
+    it('a report with several images arrives complete after a drop in the middle one', async () => {
+      const { runner } = setupChunked({ 6: { mode: 'dropMidUpload', dropAfterBytes: 5_000, count: 1 } });
+      const images = [photo(120_000), photo(160_000), photo(90_000)];
+      await runner.start();
+      const report = await runner.enqueue({ description: 'cracked pipe', images });
+      expect((await delivered(runner, report.id)).status).toBe('uploaded');
+      await expectStoredIntact(images);
+    });
+  });
 });

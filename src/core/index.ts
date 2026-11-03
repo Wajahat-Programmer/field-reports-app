@@ -4,7 +4,7 @@ export * from './errors';
 export * from './validation';
 export { backoffMs } from './backoff';
 export { HttpTransport } from './httpTransport';
-export type { SendImage, SendImageRequest } from './httpTransport';
+export type { SendChunk, SendChunkRequest } from './httpTransport';
 export { prepareImage, ImageTooLargeError } from './imagePipeline';
 export type { Resizer, ResizedImage } from './imagePipeline';
 export { UploadRunner } from './runner';

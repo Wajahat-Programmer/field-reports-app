@@ -5,7 +5,7 @@ import { ReportsApi } from '../core/reportsApi';
 import { UploadRunner } from '../core/runner';
 import { config } from '../config';
 import { AsyncStorageReportStore } from '../native/asyncStorageStore';
-import { blobSendImage } from '../native/blobUploader';
+import { blobSendChunk } from '../native/blobUploader';
 import { NetInfoNetwork } from '../native/netInfoNetwork';
 import { createListCache } from './listCache';
 import { newId } from './uuid';
@@ -15,7 +15,7 @@ export function createServices() {
   const storage = createAsyncStorage('field-reports');
   const runner = new UploadRunner({
     store: new AsyncStorageReportStore(storage),
-    transport: new HttpTransport({ baseUrl: config.baseUrl, apiKey: config.apiKey, sendImage: blobSendImage }),
+    transport: new HttpTransport({ baseUrl: config.baseUrl, apiKey: config.apiKey, sendChunk: blobSendChunk }),
     network: new NetInfoNetwork(),
     newId,
   });
