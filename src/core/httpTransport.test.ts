@@ -64,7 +64,12 @@ describe('HttpTransport chunked upload', () => {
       },
     });
     await transport.putImage('id', 0, IMAGE, () => {}, new AbortController().signal);
-    expect(seen[0]).toEqual({ 'x-api-key': 'secret', 'content-type': 'image/jpeg', 'content-range': 'bytes 0-599/1000' });
+    expect(seen[0]).toEqual({
+      'x-api-key': 'secret',
+      connection: 'close',
+      'content-type': 'image/jpeg',
+      'content-range': 'bytes 0-599/1000',
+    });
     expect(seen[1]['content-range']).toBe('bytes 600-999/1000');
   });
 
