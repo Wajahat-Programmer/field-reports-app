@@ -114,7 +114,9 @@ export class HttpTransport implements Transport {
       if (response.status === 409 && typeof body?.received === 'number') {
         // Out of step with the server (a gap, or another chunk still landing): realign to its offset.
         if (++conflicts > MAX_CONFLICTS) {
-          throw new HttpError(409, body);
+          // Not an HttpError on purpose: a 409 is a final rejection, but this is only a dead connection's
+          // leftover slot on the server, which frees itself. Retry later.
+          throw new Error('The server is still busy with an earlier upload of this photo.');
         }
         received = body.received;
         if (body.busy) {

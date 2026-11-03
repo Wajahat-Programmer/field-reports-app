@@ -1,4 +1,4 @@
-import { HttpError } from './errors';
+import { classify, HttpError } from './errors';
 import { HttpTransport } from './httpTransport';
 import type { SendChunk } from './httpTransport';
 import type { ImageFile } from './types';
@@ -124,9 +124,12 @@ describe('HttpTransport chunked upload', () => {
     expect(state.have).toBe(1000);
   });
 
-  it('gives up after repeated conflicts instead of looping forever', async () => {
-    const { put } = setup({ onChunk: () => Promise.resolve({ status: 409, body: { received: 0 } }) });
-    await expect(put()).rejects.toMatchObject({ status: 409 });
+  it('gives up after repeated conflicts instead of looping forever, and the failure is retryable', async () => {
+    const { put } = setup({ onChunk: () => Promise.resolve({ status: 409, body: { received: 0, busy: true } }) });
+    const failure = await put().catch(e => e);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(HttpError);
+    expect(classify(failure)).toBe('retry'); // a drop must never become a permanent rejection
   });
 
   it.each([413, 500, 502])('turns HTTP %i into an HttpError', async status => {
