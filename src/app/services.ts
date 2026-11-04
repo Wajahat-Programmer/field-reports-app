@@ -21,7 +21,7 @@ export function createServices() {
     newId,
   });
   const api = new ReportsApi({ baseUrl: config.baseUrl, apiKey: config.apiKey, fetchImpl: blobFetch });
-  return { runner, api, listCache: createListCache(storage), draftStore: createDraftStore(storage) };
+  return { runner, api, storage, listCache: createListCache(storage), draftStore: createDraftStore(storage) };
 }
 
 export type Services = ReturnType<typeof createServices>;

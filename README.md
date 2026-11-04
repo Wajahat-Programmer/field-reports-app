@@ -6,7 +6,7 @@ if the phone goes offline, the connection drops mid-upload, or the app is killed
 
 - React Native 0.88 (bare CLI, not Expo), TypeScript, Android. iOS was not built or tried.
 - The server is in a separate repo: [field-reports-backend](https://github.com/Wajahat-Programmer/field-reports-backend).
-- 92 tests, run with `npm test`.
+- 101 tests, run with `npm test`.
 
 ## Run it
 
@@ -138,6 +138,22 @@ again in N seconds, or rejected with the reason. The "Delivered" list is fetched
 the phone, and the last list stays on screen when offline, even after a restart. Until the saved reports have loaded,
 the banner says so, and does not claim "nothing waiting".
 
+### Drafts
+
+A report you are still writing is not lost if the app is killed. The description and the photos picked so far are kept
+as a draft while you type, and pressing Back keeps it too. The home screen then shows an "Unsaved draft" card that
+says it is not waiting to upload, with Continue and Discard. A photo that was still being prepared at the moment of
+the kill is the one thing lost. Photos that belong to no saved report and no draft are deleted when the app starts.
+
+### Uploading in the background
+
+While any report is waiting, a small foreground service holds a notification ("Uploading 2 reports", or "2 reports
+saved, waiting for a connection" when offline, since it must not claim to be uploading then). It keeps Android from
+freezing or killing the app, and it runs a headless JavaScript task, because React Native stops its timers when the
+app leaves the screen and the upload runner depends on timers for its stall watchdog and retry delays. The service
+stops itself when nothing is waiting. The notification permission is asked once, after the first save; refusing it
+only hides the notification.
+
 ### Start over
 
 It deletes every report that has not been delivered, with its photos and any leftover upload files, cancels an upload
@@ -158,20 +174,25 @@ I kept it local on purpose: with no login, a server-side wipe from a phone would
   looking alive. Sending everything through one library with a short timeout made recovery after a drop about 58
   seconds instead of 264. Forcing a new connection for every request was faster to recover but made throughput far
   worse on a slow link, so I dropped it.
+- **A foreground service with a headless task, not WorkManager.** The runner already lives in the app's JavaScript, so
+  the simplest thing that keeps it running is to keep the process alive. I first tried the service alone and an upload
+  still stalled in the background, which is how I found that React Native pauses its timers; the headless task fixed it.
 - **No navigation library.** Two screens do not need one.
 - **A release build as the thing to run.** Force-quit and airplane mode are part of the brief, and a debug build
   cannot restart without its dev server.
 
 ## What was tested
 
-- **92 automated tests.** Unit tests for the runner (offline then online, a simulated kill, a lost reply, 5xx versus
+- **101 automated tests.** Unit tests for the runner (offline then online, a simulated kill, a lost reply, 5xx versus
   4xx, a hung request, airplane mode in the middle, a rejected key, a server wipe, reset, backoff), the transport,
-  the image pipeline, validation, storage and status wording. Plus 9 that run the real runner against the real backend
+  the image pipeline, validation, storage, drafts, the notification wording and the status wording. Plus 9 that run the real runner against the real backend
   with its fault switches. I broke the code on purpose several times and checked that the right test failed.
 - **On an emulator (Pixel 6, Android 14, release build):** three reports composed offline (5, 1 and 2 photos), force-quit
   and reopened, then delivered over a slow link with the connection cut at two points; every report arrived exactly
   once with every photo intact and under 5 MB. Also checked: camera capture, refusing and then granting the camera,
-  the gallery picker with a 21 MB original, Start over, and the delivered list while offline.
+  the gallery picker with a 21 MB original, Start over, and the delivered list while offline. A draft survived a
+  force-quit while composing. A report saved and then sent to the background was delivered with the app off screen the
+  whole time, with the connection cut in the middle, and the foreground service stopped by itself afterwards.
 - **Bugs this found and I fixed:** a dropped connection turning into a permanent failure, an image whose last byte
   arrived but was never registered, the delivered list vanishing offline, a "nothing waiting" flash at start-up, and a
   retry delay that stayed at its maximum after a long outage.
@@ -180,11 +201,10 @@ I kept it local on purpose: with no login, a server-side wipe from a phone would
 
 - **No real phone.** Everything above ran on an emulator. Camera capture, true airplane mode and OEM battery
   behaviour on a physical device are unchecked.
-- **Background uploads.** Uploads run while the app process is alive and resume when it is opened again. I did not add
-  a foreground service or WorkManager, so Android may pause uploads when the app has been in the background for a while.
-  This is the biggest gap.
-- **A report that is still being written** (description typed, photos picked, not saved) is lost if the app is killed.
-  Saved reports are safe.
+- **Background uploads are a best effort.** The service starts while the app is on screen (Android 12 and later refuse
+  to start one from the background), so work that arrives while the app is already in the background waits until it is
+  opened. If the person swipes the app away, uploads stop and resume the next time it is opened. Only checked on an
+  emulator; phone makers' battery managers may still be stricter.
 - **Retries never end for unexpected errors.** A bug in my own code looks like a network error and would be retried
   forever instead of failing loudly.
 - **Accessibility** is labels and 48 dp targets, with no screen reader pass.
@@ -194,7 +214,7 @@ I kept it local on purpose: with no login, a server-side wipe from a phone would
 
 ## With another day
 
-Run uploads from a foreground service so they continue in the background; keep drafts while composing; test on a
-real phone and record the final scenario there; add an end-to-end test that drives the real app on an emulator; make
+Move background work to WorkManager so it survives the app being swiped away; test on a real phone and record the
+final scenario there; add an end-to-end test that drives the real app on an emulator; make
 the chunk size adapt to the link; show a per-photo thumbnail in the upload progress; and give each install its own
 credential in place of the shared key.

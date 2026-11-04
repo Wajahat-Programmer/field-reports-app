@@ -4,7 +4,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { createServices } from './src/app/services';
 import type { Report } from './src/core/types';
+import { keepAliveText } from './src/app/keepAlive';
 import { clearChunkTemps } from './src/native/blobUploader';
+import { askForNotificationsOnce, showKeepAlive, stopKeepAlive } from './src/native/keepAlive';
 import { clearPhotos, deletePhoto, sweepPhotos } from './src/native/photos';
 import { ComposeScreen } from './src/screens/ComposeScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -12,7 +14,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 const removePhotos = (reports: Report[]) => Promise.all(reports.flatMap(r => r.images.map(i => deletePhoto(i.uri))));
 
 export default function App() {
-  const { runner, api, listCache, draftStore } = useMemo(createServices, []);
+  const { runner, api, storage, listCache, draftStore } = useMemo(createServices, []);
   const [screen, setScreen] = useState<'home' | 'compose'>('home');
   const [delivered, setDelivered] = useState(0);
 
@@ -55,6 +57,29 @@ export default function App() {
     };
   }, [runner, settle, draftStore]);
 
+  // While reports are waiting, hold a foreground notification so Android keeps the app alive in the background.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const sync = async () => {
+      const text = keepAliveText(await runner.list(), runner.getState().online);
+      if (text) {
+        showKeepAlive(text);
+      } else {
+        stopKeepAlive();
+      }
+    };
+    const off = runner.subscribe(() => {
+      clearTimeout(timer);
+      timer = setTimeout(sync, 400);
+    });
+    sync();
+    return () => {
+      off();
+      clearTimeout(timer);
+      stopKeepAlive();
+    };
+  }, [runner]);
+
   const reset = useCallback(async () => {
     await removePhotos(await runner.reset());
     await clearPhotos();
@@ -67,7 +92,10 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
       {screen === 'compose' ? (
-        <ComposeScreen runner={runner} draftStore={draftStore} onDone={() => setScreen('home')} onCancel={() => setScreen('home')} />
+        <ComposeScreen runner={runner} draftStore={draftStore} onDone={() => {
+            setScreen('home');
+            askForNotificationsOnce(storage);
+          }} onCancel={() => setScreen('home')} />
       ) : (
         <HomeScreen runner={runner} api={api} listCache={listCache} draftStore={draftStore} deliveredCount={delivered} onNew={() => setScreen('compose')} onReset={reset} />
       )}
