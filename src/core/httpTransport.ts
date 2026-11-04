@@ -101,7 +101,6 @@ export class HttpTransport implements Transport {
         url: `${this.options.baseUrl}${path}`,
         headers: {
           'x-api-key': this.options.apiKey,
-          connection: 'close',
           'content-type': image.mime,
           'content-range': `bytes ${received}-${end - 1}/${image.bytes}`,
         },
@@ -146,9 +145,7 @@ export class HttpTransport implements Transport {
       method,
       signal,
       body,
-      // `connection: close` asks for a fresh connection every time. After a network drop, a pooled connection
-      // can be dead while still looking alive, and every request sent down it hangs until it times out.
-      headers: { 'x-api-key': this.options.apiKey, connection: 'close', ...(contentType ? { 'content-type': contentType } : {}) },
+      headers: { 'x-api-key': this.options.apiKey, ...(contentType ? { 'content-type': contentType } : {}) },
     });
     if (!response.ok) {
       throw new HttpError(response.status, await response.json().catch(() => undefined));

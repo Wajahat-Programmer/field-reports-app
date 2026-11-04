@@ -53,8 +53,9 @@ export class UploadRunner {
     this.transport = options.transport;
     this.network = options.network;
     this.newId = options.newId;
-    // Generous: a cold start (Android's WebView/cookie setup on first request) can eat many seconds on a weak phone.
-    this.stallMs = options.stallMs ?? 60_000;
+    // Generous for a cold start (Android's WebView/cookie setup on the first request), but short enough that a
+    // dead connection costs seconds. Chunks are small, so a healthy request is confirmed well inside this.
+    this.stallMs = options.stallMs ?? 45_000;
     this.backoff = options.backoff ?? backoffMs;
   }
 
