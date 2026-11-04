@@ -10,15 +10,16 @@ if the phone goes offline, the connection drops mid-upload, or the app is killed
 
 ## Try it without building
 
-The quickest way to see it: install the prebuilt APK from
-[this Drive folder](https://drive.google.com/drive/folders/19rCShvgFH8raEXE1QnbQgdWu7YVSX2Wg), which also has a
+The quickest way to see it: install the prebuilt APK from the
+[latest release](https://github.com/Wajahat-Programmer/field-reports-app/releases/latest), or from
+[this Drive folder](https://drive.google.com/drive/folders/19rCShvgFH8raEXE1QnbQgdWu7YVSX2Wg). Both also have a
 2.5 minute screen recording of the main scenario. The phone needs Android 7 or newer.
 
 ```bash
 adb install -r field-reports.apk     # or copy it to the phone and open it
 ```
 
-It talks to my test server, so it works with no setup. You can try airplane mode, force-quit and a slow connection
+It talks to my demo server, so it works with no setup. You can try airplane mode, force-quit and a slow connection
 straight away. To make the *server* fail on purpose you need your own backend, which is the next two sections.
 
 ## Run it from source
@@ -215,7 +216,7 @@ I kept it local on purpose: with no login, a server-side wipe from a phone would
   the simplest thing that keeps it running is to keep the process alive. I first tried the service alone and an upload
   still stalled in the background, which is how I found that React Native pauses its timers; the headless task fixed it.
 - **No navigation library.** Two screens do not need one.
-- **A release build as the thing to run.** Force-quit and airplane mode are part of the brief, and a debug build
+- **A release build as the thing to run.** Force-quit and airplane mode are central to how the app is used, and a debug build
   cannot restart without its dev server.
 
 ## What was tested
@@ -245,11 +246,11 @@ I kept it local on purpose: with no login, a server-side wipe from a phone would
 - **Retries never end for unexpected errors.** A bug in my own code looks like a network error and would be retried
   forever instead of failing loudly.
 - **Accessibility** is labels and 48 dp targets, with no screen reader pass.
-- The API key is inside the app, which is fine for a test with no login and not for production.
+- The API key is inside the app, which is fine for a demo with no login and not for production.
 - The release APK is signed with the debug key.
 - iOS was not touched.
 
-## With another day
+## Next steps
 
 Move background work to WorkManager so it survives the app being swiped away; test on a real phone and record the
 final scenario there; add an end-to-end test that drives the real app on an emulator; make
