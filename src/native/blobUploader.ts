@@ -37,9 +37,19 @@ export const blobFetch = (async (url: string, init: RequestInit = {}) => {
   }
 }) as typeof fetch;
 
+const CHUNK_PREFIX = 'chunk-';
+
+/** Slices are deleted right after each chunk; this sweeps up any that a cancelled or killed request left behind. */
+export async function clearChunkTemps(): Promise<void> {
+  const names = await fs.ls(fs.dirs.CacheDir).catch(() => [] as string[]);
+  await Promise.all(
+    names.filter(name => name.startsWith(CHUNK_PREFIX)).map(name => fs.unlink(`${fs.dirs.CacheDir}/${name}`).catch(() => {})),
+  );
+}
+
 /** Cuts one slice out of the stored photo and PATCHes it, streaming the slice from disk. */
 export const blobSendChunk: SendChunk = async ({ url, headers, image, start, end, signal }) => {
-  const slice = `${fs.dirs.CacheDir}/chunk-${Date.now()}-${start}.bin`;
+  const slice = `${fs.dirs.CacheDir}/${CHUNK_PREFIX}${Date.now()}-${start}.bin`;
   await fs.slice(toPath(image.uri), slice, start, end);
   const task = client().fetch('PATCH', url, headers, ReactNativeBlobUtil.wrap(slice));
   const cancel = () => task.cancel();

@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { createServices } from './src/app/services';
 import type { Report } from './src/core/types';
+import { clearChunkTemps } from './src/native/blobUploader';
 import { clearPhotos, deletePhoto } from './src/native/photos';
 import { ComposeScreen } from './src/screens/ComposeScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -26,7 +27,8 @@ export default function App() {
   );
 
   useEffect(() => {
-    runner.start().then(async () => {
+    // Before the runner starts, so it can't delete a slice an upload is using.
+    clearChunkTemps().then(() => runner.start()).then(async () => {
       for (const report of await runner.list()) {
         if (report.status === 'uploaded') {
           settle(report); // left over if the app died between "uploaded" and cleanup
@@ -50,6 +52,7 @@ export default function App() {
   const reset = useCallback(async () => {
     await removePhotos(await runner.reset());
     await clearPhotos();
+    await clearChunkTemps();
     await runner.start();
   }, [runner]);
 
