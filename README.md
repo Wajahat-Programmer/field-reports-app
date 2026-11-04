@@ -8,51 +8,88 @@ if the phone goes offline, the connection drops mid-upload, or the app is killed
 - The server is in a separate repo: [field-reports-backend](https://github.com/Wajahat-Programmer/field-reports-backend).
 - 101 tests, run with `npm test`.
 
-## Run it
+## Try it without building
 
-You need Node 22.11 or newer, a JDK 17 or newer (built with 20), the Android SDK, and an emulator or a phone with
-USB debugging.
-
-```bash
-npm ci
-cp src/config.local.example.ts src/config.local.ts   # then edit it
-```
-
-`src/config.local.ts` holds the server address and the API key. It is git-ignored because the key is in it.
-
-```ts
-export default { baseUrl: 'https://your-server.example.com', apiKey: 'the-backend-API_KEY' };
-```
-
-Debug build with hot reload:
+The quickest way to see it: install the prebuilt APK from
+[this Drive folder](https://drive.google.com/drive/folders/19rCShvgFH8raEXE1QnbQgdWu7YVSX2Wg), which also has a
+2.5 minute screen recording of the main scenario. The phone needs Android 7 or newer.
 
 ```bash
-npx react-native start
-npx react-native run-android
+adb install -r field-reports.apk     # or copy it to the phone and open it
 ```
 
-A debug build loads its JavaScript from Metro, so it cannot reopen on its own once the dev server is gone, for
-example in airplane mode after a force-quit. For anything that should survive that, build the release APK, which
-carries its own bundle:
+It talks to my test server, so it works with no setup. You can try airplane mode, force-quit and a slow connection
+straight away. To make the *server* fail on purpose you need your own backend, which is the next two sections.
 
-```bash
-cd android && ./gradlew assembleRelease
-# android/app/build/outputs/apk/release/app-release.apk  (signed with the debug key, fine for a demo)
-adb install -r android/app/build/outputs/apk/release/app-release.apk
-```
+## Run it from source
 
-To use a backend on your own machine from the emulator, run it on port 3000 and set `baseUrl` to
-`http://10.0.2.2:3000`. Plain http only works in debug builds; the release build needs https.
+You need:
+
+- Node 22.11 or newer.
+- A JDK, 17 or newer (built with 20).
+- The Android SDK, with the `ANDROID_HOME` environment variable pointing at it (or `sdk.dir=...` in
+  `android/local.properties`).
+- An emulator, or a phone with USB debugging.
+
+**On Windows, clone to a short path such as `C:\src`.** The native Android build fails on paths longer than 260
+characters.
+
+1. Install and create your config file. Without the config file, the typecheck and the build stop with
+   "Cannot find module './config.local'" (the tests do not need it).
+
+   ```bash
+   npm ci
+   cp src/config.local.example.ts src/config.local.ts        # PowerShell: Copy-Item src\config.local.example.ts src\config.local.ts
+   ```
+
+   Then edit `src/config.local.ts`. It is git-ignored because the key is in it. The key must be the one the backend
+   was started with.
+
+   ```ts
+   export default { baseUrl: 'https://your-server.example.com', apiKey: 'the-backend-API_KEY' };
+   ```
+
+2. Start a backend (next section), or point `baseUrl` at one that is already running.
+
+3. Run the app, in one of two ways.
+
+   Debug build with hot reload, using two terminals:
+
+   ```bash
+   npx react-native start
+   npx react-native run-android
+   ```
+
+   A debug build loads its JavaScript from Metro, so it cannot reopen on its own once the dev server is gone, for
+   example in airplane mode after a force-quit. For anything that should survive that, build the release APK, which
+   carries its own bundle:
+
+   ```bash
+   cd android
+   ./gradlew assembleRelease          # Windows: gradlew.bat assembleRelease
+   adb install -r app/build/outputs/apk/release/app-release.apk     # signed with the debug key, fine for a demo
+   ```
+
+### Pointing the app at a backend on your own machine
+
+- **Emulator:** run the backend on port 3000 and set `baseUrl` to `http://10.0.2.2:3000`.
+- **Phone on USB:** run `adb reverse tcp:3000 tcp:3000` and set `baseUrl` to `http://localhost:3000`.
+
+Plain http only works in debug builds. A release build needs https.
 
 ## Standing up the backend
 
-The backend README has the full steps, including the systemd unit and Caddyfile used here. In short:
+The backend README has the full steps, including the systemd unit and Caddyfile used for the live copy. To run one
+locally, which is all the app needs:
 
 ```bash
 git clone https://github.com/Wajahat-Programmer/field-reports-backend && cd field-reports-backend
 npm ci
-API_KEY=choose-a-secret npm start
+API_KEY=choose-a-secret npm start      # PowerShell: $env:API_KEY = "choose-a-secret"; npm start
 ```
+
+Use the same `choose-a-secret` as `apiKey` in the app's config. Check it is up with
+`curl http://127.0.0.1:3000/health`, which answers `{"ok":true}`.
 
 The live copy runs on an Oracle Cloud Always Free VM behind Caddy.
 
