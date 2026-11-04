@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ReportsApi, ServerReport } from '../core/reportsApi';
+import type { Draft, DraftStore } from './draftStore';
 import type { ListCache } from './listCache';
 import type { RunnerState, UploadRunner } from '../core/runner';
 import type { Report } from '../core/types';
@@ -101,4 +102,17 @@ export function useServerReports(api: ReportsApi, cache: ListCache) {
   }, [api, cache, refresh]);
 
   return { list, refresh };
+}
+
+/** The report being composed but not saved, if there is one. Read each time the home screen appears. */
+export function useDraft(draftStore: DraftStore) {
+  const [draft, setDraft] = useState<Draft | undefined>();
+  useEffect(() => {
+    let alive = true;
+    draftStore.load().then(d => alive && setDraft(d));
+    return () => {
+      alive = false;
+    };
+  }, [draftStore]);
+  return { draft, clearLocal: () => setDraft(undefined) };
 }

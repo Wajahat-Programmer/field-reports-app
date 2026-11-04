@@ -7,6 +7,7 @@ import { config } from '../config';
 import { AsyncStorageReportStore } from '../native/asyncStorageStore';
 import { blobFetch, blobSendChunk } from '../native/blobUploader';
 import { NetInfoNetwork } from '../native/netInfoNetwork';
+import { createDraftStore } from './draftStore';
 import { createListCache } from './listCache';
 import { newId } from './uuid';
 
@@ -20,7 +21,7 @@ export function createServices() {
     newId,
   });
   const api = new ReportsApi({ baseUrl: config.baseUrl, apiKey: config.apiKey, fetchImpl: blobFetch });
-  return { runner, api, listCache: createListCache(storage) };
+  return { runner, api, listCache: createListCache(storage), draftStore: createDraftStore(storage) };
 }
 
 export type Services = ReturnType<typeof createServices>;

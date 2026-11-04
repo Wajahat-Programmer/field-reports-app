@@ -23,6 +23,13 @@ export const deletePhoto = (uri: string): Promise<void> => fs.unlink(uri.replace
 /** Removes every stored photo, including ones left behind by reports that were never saved. */
 export const clearPhotos = (): Promise<void> => fs.unlink(PHOTO_DIR).catch(() => {});
 
+/** Deletes every stored photo that is not in `keep` (the photos of saved reports and of the draft). */
+export async function sweepPhotos(keep: string[]): Promise<void> {
+  const names = new Set(keep.map(uri => uri.split('/').pop()));
+  const files = await fs.ls(PHOTO_DIR).catch(() => [] as string[]);
+  await Promise.all(files.filter(name => !names.has(name)).map(name => fs.unlink(`${PHOTO_DIR}/${name}`).catch(() => {})));
+}
+
 /** Shrinks a picked or captured photo to something sendable and stores it durably. */
 export function preparePhoto(sourceUri: string): Promise<ImageFile> {
   return prepareImage(sourceUri, resize, deletePhoto);

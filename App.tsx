@@ -5,14 +5,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createServices } from './src/app/services';
 import type { Report } from './src/core/types';
 import { clearChunkTemps } from './src/native/blobUploader';
-import { clearPhotos, deletePhoto } from './src/native/photos';
+import { clearPhotos, deletePhoto, sweepPhotos } from './src/native/photos';
 import { ComposeScreen } from './src/screens/ComposeScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 
 const removePhotos = (reports: Report[]) => Promise.all(reports.flatMap(r => r.images.map(i => deletePhoto(i.uri))));
 
 export default function App() {
-  const { runner, api, listCache } = useMemo(createServices, []);
+  const { runner, api, listCache, draftStore } = useMemo(createServices, []);
   const [screen, setScreen] = useState<'home' | 'compose'>('home');
   const [delivered, setDelivered] = useState(0);
 
@@ -27,14 +27,20 @@ export default function App() {
   );
 
   useEffect(() => {
-    // Before the runner starts, so it can't delete a slice an upload is using.
-    clearChunkTemps().then(() => runner.start()).then(async () => {
+    // Housekeeping runs before the runner starts, so it can't delete a file an upload is using.
+    const boot = async () => {
+      await clearChunkTemps();
+      const [reports, draft] = await Promise.all([runner.list(), draftStore.load()]);
+      // Photos prepared for a draft that was never finished or saved belong to nothing: delete them.
+      await sweepPhotos([...reports.flatMap(r => r.images), ...(draft?.images ?? [])].map(i => i.uri));
+      await runner.start();
       for (const report of await runner.list()) {
         if (report.status === 'uploaded') {
           settle(report); // left over if the app died between "uploaded" and cleanup
         }
       }
-    });
+    };
+    boot();
     const off = runner.subscribe(event => {
       if (event.type === 'report' && event.report.status === 'uploaded') {
         settle(event.report);
@@ -47,22 +53,23 @@ export default function App() {
       appState.remove();
       runner.stop();
     };
-  }, [runner, settle]);
+  }, [runner, settle, draftStore]);
 
   const reset = useCallback(async () => {
     await removePhotos(await runner.reset());
     await clearPhotos();
     await clearChunkTemps();
+    await draftStore.clear();
     await runner.start();
-  }, [runner]);
+  }, [runner, draftStore]);
 
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
       {screen === 'compose' ? (
-        <ComposeScreen runner={runner} onDone={() => setScreen('home')} onCancel={() => setScreen('home')} />
+        <ComposeScreen runner={runner} draftStore={draftStore} onDone={() => setScreen('home')} onCancel={() => setScreen('home')} />
       ) : (
-        <HomeScreen runner={runner} api={api} listCache={listCache} deliveredCount={delivered} onNew={() => setScreen('compose')} onReset={reset} />
+        <HomeScreen runner={runner} api={api} listCache={listCache} draftStore={draftStore} deliveredCount={delivered} onNew={() => setScreen('compose')} onReset={reset} />
       )}
     </SafeAreaProvider>
   );

@@ -3,7 +3,8 @@ import { ActivityIndicator, Alert, RefreshControl, SectionList, StyleSheet, Text
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ListCache } from '../app/listCache';
-import { useNow, useRunner, useServerReports } from '../app/hooks';
+import type { DraftStore } from '../app/draftStore';
+import { useDraft, useNow, useRunner, useServerReports } from '../app/hooks';
 import { summarize } from '../app/status';
 import type { ReportsApi } from '../core/reportsApi';
 import type { UploadRunner } from '../core/runner';
@@ -11,23 +12,26 @@ import { Button } from '../components/Button';
 import { DeliveredCard } from '../components/DeliveredCard';
 import { ReportCard } from '../components/ReportCard';
 import { StatusBanner } from '../components/StatusBanner';
+import { deletePhoto } from '../native/photos';
 import { colors } from '../theme';
 
 interface Props {
   runner: UploadRunner;
   api: ReportsApi;
   listCache: ListCache;
+  draftStore: DraftStore;
   /** Bumps whenever a report is confirmed delivered, so the server list refreshes. */
   deliveredCount: number;
   onNew: () => void;
   onReset: () => Promise<void>;
 }
 
-export function HomeScreen({ runner, api, listCache, deliveredCount, onNew, onReset }: Props) {
+export function HomeScreen({ runner, api, listCache, draftStore, deliveredCount, onNew, onReset }: Props) {
   const insets = useSafeAreaInsets();
   const { reports, state, progress, loaded } = useRunner(runner);
   const { list, refresh } = useServerReports(api, listCache);
   const now = useNow();
+  const { draft, clearLocal } = useDraft(draftStore);
 
   useEffect(() => {
     if (deliveredCount > 0) {
@@ -50,6 +54,20 @@ export function HomeScreen({ runner, api, listCache, deliveredCount, onNew, onRe
     Alert.alert('Delete this report?', 'It has not been delivered. It will be removed from this phone for good.', [
       { text: 'Keep', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => runner.discard(id).catch(() => {}) },
+    ]);
+
+  const confirmDiscardDraft = () =>
+    Alert.alert('Discard this draft?', 'The description and photos will be deleted from this phone.', [
+      { text: 'Keep', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          await Promise.all((draft?.images ?? []).map(image => deletePhoto(image.uri)));
+          await draftStore.clear();
+          clearLocal();
+        },
+      },
     ]);
 
   const confirmReset = () =>
@@ -78,7 +96,17 @@ export function HomeScreen({ runner, api, listCache, deliveredCount, onNew, onRe
             Field reports
           </Text>
           <StatusBanner summary={summary} />
-          <Button label="New report" kind="primary" onPress={onNew} />
+          <Button label={draft ? 'Continue draft' : 'New report'} kind="primary" onPress={onNew} />
+          {draft ? (
+            <View style={styles.draft}>
+              <Text style={styles.draftTitle}>Unsaved draft</Text>
+              <Text style={styles.draftBody} numberOfLines={2}>
+                {draft.description.trim() || 'No description yet'} · {draft.images.length} {draft.images.length === 1 ? 'photo' : 'photos'}
+              </Text>
+              <Text style={styles.draftBody}>Not saved yet, so it is not waiting to upload.</Text>
+              <Button label="Discard draft" kind="danger" onPress={() => confirmDiscardDraft()} />
+            </View>
+          ) : null}
         </View>
       }
       sections={[
@@ -143,6 +171,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '800', color: colors.ink },
   section: { fontSize: 14, fontWeight: '700', color: colors.inkSoft, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 20, marginBottom: 8 },
   gap: { height: 10 },
+  draft: { backgroundColor: '#FBEFDF', borderLeftWidth: 5, borderLeftColor: '#E08A34', borderRadius: 8, padding: 12, gap: 8 },
+  draftTitle: { fontSize: 15, fontWeight: '700', color: '#7A4A12' },
+  draftBody: { fontSize: 14, color: '#7A4A12' },
   empty: { paddingVertical: 8, gap: 8 },
   emptyText: { fontSize: 14, color: colors.inkSoft },
   footer: { marginTop: 28, gap: 8 },

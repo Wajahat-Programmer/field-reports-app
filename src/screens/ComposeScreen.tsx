@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { DraftStore } from '../app/draftStore';
 import { newId } from '../app/uuid';
 import type { UploadRunner } from '../core/runner';
 import type { ImageFile } from '../core/types';
@@ -32,45 +33,88 @@ interface Slot {
 
 interface Props {
   runner: UploadRunner;
+  draftStore: DraftStore;
   onDone: () => void;
   onCancel: () => void;
 }
 
-export function ComposeScreen({ runner, onDone, onCancel }: Props) {
+export function ComposeScreen({ runner, draftStore, onDone, onCancel }: Props) {
   const insets = useSafeAreaInsets();
   const [description, setDescription] = useState('');
   const [slots, setSlots] = useState<Slot[]>([]);
   const [camera, setCamera] = useState<'denied' | 'blocked' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
-  // Photos belong to the report only once it is saved; until then we clean up after ourselves.
+  // What is typed and picked so far is kept as a draft, so a killed app doesn't lose it.
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
-  const saved = useRef(false);
+  const descriptionRef = useRef(description);
+  descriptionRef.current = description;
+  const finished = useRef(false); // saved or discarded: stop writing the draft
+  const currentDraft = useCallback(
+    () => ({
+      description: descriptionRef.current,
+      images: slotsRef.current.flatMap(s => (s.status === 'ready' && s.image ? [s.image] : [])),
+    }),
+    [],
+  );
   const discardPhotos = useCallback(() => {
     slotsRef.current.forEach(slot => slot.image && deletePhoto(slot.image.uri));
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    draftStore.load().then(draft => {
+      if (!alive) {
+        return;
+      }
+      if (draft) {
+        setDescription(draft.description);
+        setSlots(draft.images.map(image => ({ key: newId(), status: 'ready' as const, image })));
+      }
+      setLoaded(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [draftStore]);
+
+  useEffect(() => {
+    if (!loaded || finished.current) {
+      return;
+    }
+    const timer = setTimeout(() => draftStore.save(currentDraft()), 300);
+    return () => clearTimeout(timer);
+  }, [description, slots, loaded, draftStore, currentDraft]);
 
   const ready = slots.filter(s => s.status === 'ready');
   const preparing = slots.some(s => s.status === 'preparing');
   const dirty = description.trim().length > 0 || slots.length > 0;
   const canSave = description.trim().length > 0 && ready.length >= 1 && !preparing && !saving;
 
-  const leave = useCallback(() => {
-    const exit = () => {
-      discardPhotos();
-      onCancel();
-    };
-    if (!dirty) {
-      onCancel();
-      return;
-    }
-    Alert.alert('Discard this report?', 'It has not been saved yet.', [
-      { text: 'Keep editing', style: 'cancel' },
-      { text: 'Discard', style: 'destructive', onPress: exit },
+  // Leaving keeps the draft; the home screen offers to continue or discard it.
+  const leave = useCallback(async () => {
+    finished.current = true;
+    await draftStore.save(currentDraft());
+    onCancel();
+  }, [draftStore, currentDraft, onCancel]);
+
+  const discardDraft = () =>
+    Alert.alert('Discard this draft?', 'The description and photos will be deleted from this phone.', [
+      { text: 'Keep', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          finished.current = true;
+          discardPhotos();
+          await draftStore.clear();
+          onCancel();
+        },
+      },
     ]);
-  }, [dirty, discardPhotos, onCancel]);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -89,15 +133,6 @@ export function ComposeScreen({ runner, onDone, onCancel }: Props) {
     });
     return () => sub.remove();
   }, []);
-
-  useEffect(
-    () => () => {
-      if (!saved.current) {
-        discardPhotos();
-      }
-    },
-    [discardPhotos],
-  );
 
   const addPhotos = async (uris: string[]) => {
     const room = MAX_IMAGES - slotsRef.current.length;
@@ -151,7 +186,8 @@ export function ComposeScreen({ runner, onDone, onCancel }: Props) {
     setError(null);
     try {
       await runner.enqueue({ description, images: ready.map(s => s.image as ImageFile) });
-      saved.current = true;
+      finished.current = true;
+      await draftStore.clear();
       onDone();
     } catch (e) {
       setSaving(false);
@@ -253,6 +289,7 @@ export function ComposeScreen({ runner, onDone, onCancel }: Props) {
             ? 'Saving keeps it on this phone and uploads it whenever there is a connection.'
             : 'Add a description and at least one photo.'}
         </Text>
+        {dirty ? <Button label="Discard draft" kind="danger" onPress={discardDraft} /> : null}
       </ScrollView>
     </View>
   );
